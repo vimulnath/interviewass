@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+@theme {
+  --color-zinc-950: #09090b;
+}
+
+body {
+  @apply transition-colors duration-300 bg-zinc-950 text-zinc-100;
+  background: radial-gradient(circle at 80% 20%, rgba(168, 85, 247, 0.25), transparent 60%),
+              radial-gradient(circle at 20% 80%, rgba(236, 72, 153, 0.2), transparent 60%),
+              radial-gradient(circle at 50% 50%, rgba(168, 85, 247, 0.05), transparent 80%),
+              #09090b;
+  color-scheme: dark;
+}
+
+.glass-panel {
+  @apply backdrop-blur-xl border transition-all duration-300 bg-zinc-900/40 border-white/5;
+}
+
+.metric-tab-active {
+  @apply transition-all duration-300 bg-white/10 text-white border-white/20;
+}

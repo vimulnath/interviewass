@@ -1,0 +1,7 @@
+{
+  "name": "Navigator AI",
+  "description": "A minimalistic AI-powered interview assistant that helps interviewers detect cheating, navigate topics, and evaluate candidate quality in real-time.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
