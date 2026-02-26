@@ -86,6 +86,8 @@ export default function App() {
   const [rubric, setRubric] = useState<string[]>(['Technical Accuracy', 'Communication', 'Problem Solving']);
   const [newRubricItem, setNewRubricItem] = useState('');
   const [showSummary, setShowSummary] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isSupported, setIsSupported] = useState(true);
   
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -99,81 +101,93 @@ export default function App() {
 
   // Speech Recognition Setup
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.webkitSpeechRecognition && !recognitionRef.current) {
-      const SpeechRecognition = window.webkitSpeechRecognition;
-      const recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = true;
-      recognition.lang = 'en-US';
-      recognition.maxAlternatives = 1; // Keep it simple but focused
+    if (typeof window !== 'undefined') {
+      if (!window.webkitSpeechRecognition) {
+        console.warn('Speech recognition not supported in this browser');
+        setIsSupported(false);
+        return;
+      }
+      
+      try {
+        const SpeechRecognition = window.webkitSpeechRecognition;
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+        recognition.maxAlternatives = 1;
 
-      recognition.onresult = (event: SpeechRecognitionEvent) => {
-        let finalTranscript = '';
-        let interimTranscript = '';
+        recognition.onresult = (event: SpeechRecognitionEvent) => {
+          let finalTranscript = '';
+          let interimTranscript = '';
 
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          const transcriptPart = event.results[i][0].transcript;
-          if (event.results[i].isFinal) {
-            finalTranscript += transcriptPart;
-          } else {
-            interimTranscript += transcriptPart;
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            const transcriptPart = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              finalTranscript += transcriptPart;
+            } else {
+              interimTranscript += transcriptPart;
+            }
           }
-        }
 
-        if (finalTranscript) {
-          setTranscript(prev => {
-            const now = Date.now();
-            if (prev.length > 0) {
-              const last = prev[prev.length - 1];
-              // Increased buffer to 8 seconds to capture longer, more complex thoughts
-              if (now - last.timestamp < 8000) {
-                const updated = [...prev];
-                updated[updated.length - 1] = {
-                  ...last,
-                  text: (last.text + " " + finalTranscript.trim()).trim(),
-                  timestamp: now
-                };
-                return updated;
+          if (finalTranscript) {
+            setTranscript(prev => {
+              const now = Date.now();
+              if (prev.length > 0) {
+                const last = prev[prev.length - 1];
+                // Increased buffer to 8 seconds to capture longer, more complex thoughts
+                if (now - last.timestamp < 8000) {
+                  const updated = [...prev];
+                  updated[updated.length - 1] = {
+                    ...last,
+                    text: (last.text + " " + finalTranscript.trim()).trim(),
+                    timestamp: now
+                  };
+                  return updated;
+                }
               }
-            }
-            return [...prev, { text: finalTranscript.trim(), timestamp: now }];
-          });
-          setSelectedLineIndex(null);
-          setInterimText('');
-        } else {
-          setInterimText(interimTranscript);
-        }
-      };
+              return [...prev, { text: finalTranscript.trim(), timestamp: now }];
+            });
+            setSelectedLineIndex(null);
+            setInterimText('');
+          } else {
+            setInterimText(interimTranscript);
+          }
+        };
 
-      recognition.onerror = (event: any) => {
-        console.error('Speech recognition error', event.error);
-        if (event.error === 'no-speech') {
-          // No speech detected for a while, just keep going
-          return;
-        }
-        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-          setIsListening(false);
-          (window as any)._isListening = false;
-        }
-      };
-
-      recognition.onend = () => {
-        // Aggressive restart logic for better "hearing" persistence
-        if ((window as any)._isListening) {
-          setTimeout(() => {
-            try {
-              if ((window as any)._isListening) {
-                recognition.start();
+        recognition.onend = () => {
+          // Aggressive restart logic for better "hearing" persistence
+          if ((window as any)._isListening) {
+            setTimeout(() => {
+              try {
+                if ((window as any)._isListening) {
+                  recognition.start();
+                }
+              } catch (e) {
+                // Usually means it's already started, which is fine
               }
-            } catch (e) {
-              // Usually means it's already started, which is fine
-            }
-          }, 100);
-        }
-      };
+            }, 100);
+          }
+        };
 
-      recognitionRef.current = recognition;
+        recognition.onerror = (event: any) => {
+          console.error('Speech recognition error', event.error);
+          if (event.error === 'not-allowed') {
+            alert('Microphone access is required for Navigator to work. Please enable it in your browser settings.');
+          }
+        };
+
+        recognitionRef.current = recognition;
+      } catch (err) {
+        console.error('Failed to initialize speech recognition', err);
+        setIsSupported(false);
+      }
     }
+
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+    };
   }, []);
 
   // Sync state to a global-ish variable to avoid closure issues in onend
@@ -282,13 +296,28 @@ export default function App() {
     ? transcript[selectedLineIndex]?.analysis 
     : transcript[transcript.length - 1]?.analysis;
 
+  if (!isSupported) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center space-y-6">
+        <div className="w-20 h-20 rounded-3xl bg-red-500/10 text-red-500 flex items-center justify-center">
+          <ShieldAlert className="w-10 h-10" />
+        </div>
+        <div className="space-y-2">
+          <h1 className="text-2xl font-black">Browser Not Supported</h1>
+          <p className="opacity-60 max-w-xs mx-auto">Navigator requires a browser with Web Speech API support (like Chrome or Edge) to function.</p>
+        </div>
+        <Button onClick={() => window.location.reload()}>Retry Connection</Button>
+      </div>
+    );
+  }
+
   if (!isStarted) {
     return (
-      <div className={cn("min-h-screen flex flex-col items-center justify-center p-6 font-sans transition-colors duration-300")}>
+      <div className={cn("min-h-screen flex flex-col items-center justify-center p-4 lg:p-6 font-sans transition-colors duration-300 overflow-y-auto")}>
         <motion.div 
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="max-w-md w-full space-y-12 text-center"
+          className="max-w-md w-full space-y-8 lg:space-y-12 text-center py-12"
         >
           <div className="space-y-4">
             <motion.div 
@@ -387,10 +416,26 @@ export default function App() {
   }
 
   return (
-    <div className={cn("min-h-screen flex font-sans selection:bg-purple-500 selection:text-white transition-colors duration-300")}>
+    <div className={cn("min-h-screen flex flex-col lg:flex-row font-sans selection:bg-purple-500 selection:text-white transition-colors duration-300 overflow-hidden")}>
+      {/* Mobile Header */}
+      <div className="lg:hidden p-4 border-b border-white/5 bg-zinc-950 flex items-center justify-between z-50">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center text-zinc-950">
+            <TorchLogo className="w-4 h-4" />
+          </div>
+          <span className="font-black text-xs tracking-tighter">NAVIGATOR</span>
+        </div>
+        <Button variant="ghost" size="sm" onClick={() => setSidebarOpen(!sidebarOpen)}>
+          <Activity className="w-5 h-5" />
+        </Button>
+      </div>
+
       {/* Sidebar */}
-      <div className="w-80 border-r border-white/5 bg-zinc-900/20 flex flex-col backdrop-blur-md">
-        <div className="p-6 border-b border-white/5 flex items-center justify-between">
+      <div className={cn(
+        "fixed inset-y-0 left-0 z-40 w-80 border-r border-white/5 bg-zinc-900/95 lg:bg-zinc-900/20 flex flex-col backdrop-blur-md transition-transform duration-300 lg:relative lg:translate-x-0",
+        sidebarOpen ? "translate-x-0" : "-translate-x-full"
+      )}>
+        <div className="p-6 border-b border-white/5 hidden lg:flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-white flex items-center justify-center text-zinc-950 shadow-lg">
               <TorchLogo className="w-5 h-5" />
@@ -613,7 +658,7 @@ export default function App() {
       {/* Main Content */}
       <div className="flex-1 flex flex-col relative overflow-hidden">
         {/* HUD */}
-        <div className="absolute top-8 left-8 right-8 z-20 pointer-events-none">
+        <div className="absolute top-4 lg:top-8 left-4 lg:left-8 right-4 lg:right-8 z-20 pointer-events-none">
           <div className="max-w-3xl mx-auto">
             <AnimatePresence>
               {currentAnalysis && (
@@ -624,33 +669,33 @@ export default function App() {
                   className="pointer-events-auto"
                 >
                   <Card className={cn(
-                    "p-6 shadow-[0_32px_64px_rgba(0,0,0,0.2)] border-white/10 glass-panel relative overflow-hidden",
+                    "p-4 lg:p-6 shadow-[0_32px_64px_rgba(0,0,0,0.2)] border-white/10 glass-panel relative overflow-hidden",
                     currentAnalysis.shouldCutoff && "border-red-900/50 bg-red-950/20"
                   )}>
                     <div className="absolute top-0 left-0 w-1 h-full bg-purple-500/20" />
-                    <div className="flex items-start gap-6">
+                    <div className="flex flex-col lg:flex-row items-start gap-4 lg:gap-6">
                       <div className={cn(
-                        "p-3 rounded-2xl shadow-inner",
+                        "p-2 lg:p-3 rounded-xl lg:rounded-2xl shadow-inner",
                         currentAnalysis.shouldCutoff ? "bg-red-500/20 text-red-500" : "bg-purple-500/10 text-purple-500"
                       )}>
-                        {currentAnalysis.shouldCutoff ? <XOctagon className="w-7 h-7" /> : <BrainCircuit className="w-7 h-7" />}
+                        {currentAnalysis.shouldCutoff ? <XOctagon className="w-5 h-5 lg:w-7 lg:h-7" /> : <BrainCircuit className="w-5 h-5 lg:w-7 lg:h-7" />}
                       </div>
-                      <div className="flex-1 space-y-5">
+                      <div className="flex-1 space-y-3 lg:space-y-5 w-full">
                         <div className="flex items-center justify-between">
                           <div className="space-y-1">
-                            <h4 className="text-[10px] font-black opacity-50 uppercase tracking-[0.3em]">
+                            <h4 className="text-[8px] lg:text-[10px] font-black opacity-50 uppercase tracking-[0.3em]">
                               {selectedLineIndex !== null ? `Analysis for point #${selectedLineIndex + 1}` : 'Co-Pilot Suggestion'}
                             </h4>
-                            <p className="text-base font-bold leading-relaxed">{currentAnalysis.analysis}</p>
+                            <p className="text-sm lg:text-base font-bold leading-relaxed">{currentAnalysis.analysis}</p>
                           </div>
                           {selectedLineIndex !== null && (
                             <Button 
                               variant="ghost" 
                               size="sm" 
-                              className="text-[10px] font-bold uppercase tracking-widest text-purple-500"
+                              className="text-[8px] lg:text-[10px] font-bold uppercase tracking-widest text-purple-500"
                               onClick={() => setSelectedLineIndex(null)}
                             >
-                              Back to Live
+                              Live
                             </Button>
                           )}
                         </div>
@@ -690,18 +735,18 @@ export default function App() {
         {/* Transcript View */}
         <div 
           ref={scrollRef}
-          className="flex-1 overflow-y-auto p-16 pt-64 space-y-12 scroll-smooth"
+          className="flex-1 overflow-y-auto p-6 lg:p-16 pt-48 lg:pt-64 space-y-8 lg:space-y-12 scroll-smooth"
         >
           {transcript.length === 0 && !interimText && (
             <div className="h-full flex flex-col items-center justify-center opacity-20 space-y-6">
               <motion.div
                 animate={{ scale: [1, 1.1, 1], boxShadow: ["0 0 0px rgba(168,85,247,0)", "0 0 40px rgba(168,85,247,0.2)", "0 0 0px rgba(168,85,247,0)"] }}
                 transition={{ repeat: Infinity, duration: 2 }}
-                className="w-16 h-16 rounded-full border-2 border-white/5 flex items-center justify-center"
+                className="w-12 h-12 lg:w-16 lg:h-16 rounded-full border-2 border-white/5 flex items-center justify-center"
               >
-                <Mic className="w-8 h-8 opacity-20" />
+                <Mic className="w-6 h-6 lg:w-8 lg:h-8 opacity-20" />
               </motion.div>
-              <p className="text-xs font-black uppercase tracking-[0.4em] opacity-20">Waiting for speech...</p>
+              <p className="text-[10px] lg:text-xs font-black uppercase tracking-[0.4em] opacity-20">Waiting for speech...</p>
             </div>
           )}
 
@@ -711,29 +756,32 @@ export default function App() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               className={cn(
-                "max-w-3xl mx-auto flex gap-8 group cursor-pointer p-4 rounded-2xl transition-all",
+                "max-w-3xl mx-auto flex gap-4 lg:gap-8 group cursor-pointer p-3 lg:p-4 rounded-xl lg:rounded-2xl transition-all",
                 selectedLineIndex === i ? "bg-purple-500/10 ring-1 ring-purple-500/20" : "hover:bg-zinc-500/5"
               )}
-              onClick={() => setSelectedLineIndex(i)}
+              onClick={() => {
+                setSelectedLineIndex(i);
+                if (window.innerWidth < 1024) setSidebarOpen(true);
+              }}
             >
               <div className={cn(
-                "w-10 h-10 rounded-2xl flex-shrink-0 flex items-center justify-center text-[10px] font-black transition-colors border",
+                "w-8 h-8 lg:w-10 lg:h-10 rounded-lg lg:rounded-2xl flex-shrink-0 flex items-center justify-center text-[8px] lg:text-[10px] font-black transition-colors border",
                 selectedLineIndex === i 
                   ? "bg-purple-500 text-white border-purple-400" 
                   : "bg-white/5 border-white/10 opacity-60 group-hover:opacity-100"
               )}>
-                {line.analysis ? <CheckCircle2 className="w-4 h-4" /> : i + 1}
+                {line.analysis ? <CheckCircle2 className="w-3 h-3 lg:w-4 lg:h-4" /> : i + 1}
               </div>
               <div className="flex-1 space-y-1">
                 <p className={cn(
-                  "text-xl font-medium leading-relaxed transition-colors",
+                  "text-base lg:text-xl font-medium leading-relaxed transition-colors",
                   selectedLineIndex === i ? "opacity-100" : "opacity-60 group-hover:opacity-100"
                 )}>
                   {line.text}
                 </p>
                 {line.analysis && (
-                  <div className="flex items-center gap-2 text-[10px] font-bold text-purple-500 uppercase tracking-widest">
-                    <HistoryIcon className="w-3 h-3" />
+                  <div className="flex items-center gap-2 text-[8px] lg:text-[10px] font-bold text-purple-500 uppercase tracking-widest">
+                    <HistoryIcon className="w-2.5 h-2.5 lg:w-3 lg:h-3" />
                     Analysis Ready
                   </div>
                 )}
@@ -745,24 +793,24 @@ export default function App() {
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 0.5 }}
-              className="max-w-3xl mx-auto flex gap-8 px-4"
+              className="max-w-3xl mx-auto flex gap-4 lg:gap-8 px-4"
             >
-              <div className="w-10 h-10 rounded-2xl bg-white/5 border-white/10 flex-shrink-0 flex items-center justify-center text-[10px] font-black opacity-40">
+              <div className="w-8 h-8 lg:w-10 lg:h-10 rounded-lg lg:rounded-2xl bg-white/5 border-white/10 flex-shrink-0 flex items-center justify-center text-[8px] lg:text-[10px] font-black opacity-40">
                 ...
               </div>
-              <p className="text-xl opacity-40 font-medium leading-relaxed italic">{interimText}</p>
+              <p className="text-base lg:text-xl opacity-40 font-medium leading-relaxed italic">{interimText}</p>
             </motion.div>
           )}
         </div>
 
         {/* Status Bar */}
-        <div className="p-12 bg-gradient-to-t from-zinc-950 via-transparent to-transparent">
-          <div className="max-w-3xl mx-auto flex items-center justify-between">
-            <div className="flex items-center gap-6">
+        <div className="p-4 lg:p-12 bg-gradient-to-t from-zinc-950 via-transparent to-transparent">
+          <div className="max-w-3xl mx-auto flex flex-col lg:flex-row items-center justify-between gap-4 lg:gap-0">
+            <div className="flex items-center gap-4 lg:gap-6 w-full lg:w-auto">
               <Button 
                 variant="outline" 
                 className={cn(
-                  "w-16 h-16 rounded-full border-2 transition-all duration-500 relative overflow-hidden",
+                  "w-12 h-12 lg:w-16 lg:h-16 rounded-full border-2 transition-all duration-500 relative overflow-hidden flex-shrink-0",
                   isListening ? "bg-red-500 border-red-400 text-white shadow-[0_0_30px_rgba(239,68,68,0.3)]" : "bg-white/5 border-white/10 opacity-40"
                 )}
                 onClick={toggleListening}
@@ -774,27 +822,27 @@ export default function App() {
                     className="absolute inset-0 bg-white rounded-full"
                   />
                 )}
-                {isListening ? <Mic className="w-6 h-6 relative z-10" /> : <MicOff className="w-6 h-6 relative z-10" />}
+                {isListening ? <Mic className="w-5 h-5 lg:w-6 lg:h-6 relative z-10" /> : <MicOff className="w-5 h-5 lg:w-6 lg:h-6 relative z-10" />}
               </Button>
-              <div className="space-y-1">
-                <p className="text-xs font-black uppercase tracking-widest">
-                  {isListening ? 'Listening Automatically' : 'Microphone Paused'}
+              <div className="space-y-0.5 lg:space-y-1">
+                <p className="text-[10px] lg:text-xs font-black uppercase tracking-widest">
+                  {isListening ? 'Listening' : 'Paused'}
                 </p>
-                <p className="text-[10px] font-bold opacity-50 uppercase tracking-widest">
-                  {isAnalyzing ? 'AI is processing patterns...' : 'System ready for next segment'}
+                <p className="text-[8px] lg:text-[10px] font-bold opacity-50 uppercase tracking-widest">
+                  {isAnalyzing ? 'Processing...' : 'System Ready'}
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-8">
+            <div className="flex items-center gap-4 lg:gap-8 w-full lg:w-auto justify-between lg:justify-end border-t border-white/5 lg:border-0 pt-4 lg:pt-0">
               <div className="flex flex-col items-end">
-                <span className="text-[10px] font-black opacity-50 uppercase tracking-widest">Session Time</span>
-                <span className="text-sm font-black tabular-nums">00:12:45</span>
+                <span className="text-[8px] lg:text-[10px] font-black opacity-50 uppercase tracking-widest">Time</span>
+                <span className="text-xs lg:text-sm font-black tabular-nums">00:12:45</span>
               </div>
-              <div className="w-px h-8 border-white/10" />
+              <div className="w-px h-6 lg:h-8 border-white/10" />
               <div className="flex flex-col items-end">
-                <span className="text-[10px] font-black opacity-50 uppercase tracking-widest">Confidence</span>
-                <span className="text-sm font-black text-emerald-500 uppercase">High</span>
+                <span className="text-[8px] lg:text-[10px] font-black opacity-50 uppercase tracking-widest">Confidence</span>
+                <span className="text-xs lg:text-sm font-black text-emerald-500 uppercase">High</span>
               </div>
             </div>
           </div>
